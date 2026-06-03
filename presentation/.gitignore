@@ -1,0 +1,6 @@
+# Slidev build & export artifacts
+dist/
+slides-export*
+
+# Logs
+*.log
