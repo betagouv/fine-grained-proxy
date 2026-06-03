@@ -71,7 +71,14 @@
       "src/ui/changelog-data.ts"
     ]
   },
-  "exclude": [".claude/", "node_modules/", "static/"],
+  "exclude": [
+    ".claude/",
+    "node_modules/",
+    "static/",
+    "presentation/",
+    "!presentation/demo.ts",
+    "!presentation/demo-upstream/server.ts"
+  ],
   "deploy": {
     "org": "lsagetlethias",
     "app": "fgp-proxy"

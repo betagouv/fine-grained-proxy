@@ -40,9 +40,7 @@ Deno.serve({ port: PORT }, async (req) => {
 
   const appMatch = pathname.match(/^\/v1\/apps\/([^/]+)$/);
   if (method === "GET" && appMatch) {
-    const app = APPS.find((a) =>
-      a.name === appMatch[1] || a.id === appMatch[1]
-    );
+    const app = APPS.find((a) => a.name === appMatch[1] || a.id === appMatch[1]);
     return app ? json(app) : json({ error: "not_found" }, 404);
   }
 

@@ -214,8 +214,7 @@ async function opaque(): Promise<void> {
 
 async function upstream(): Promise<void> {
   title("Mock upstream sur :9000 (Ctrl-C pour stopper)");
-  const serverPath =
-    new URL("./demo-upstream/server.ts", import.meta.url).pathname;
+  const serverPath = new URL("./demo-upstream/server.ts", import.meta.url).pathname;
   const child = new Deno.Command("deno", {
     args: ["run", "--allow-net", "--allow-env", serverPath],
     stdout: "inherit",
