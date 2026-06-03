@@ -53,7 +53,7 @@ curl -X POST http://localhost:8000/api/generate \
     "token": "tk-us-xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "target": "https://api.osc-fr1.scalingo.com",
     "auth": "scalingo-exchange",
-    "scopes": ["GET:/v1/apps/*", "POST:/v1/apps/my-app/scale"],
+    "scopes": ["GET:/v1/apps", "GET:/v1/apps/*", "POST:/v1/apps/my-app/scale"],
     "ttl": 3600
   }'
 ```
@@ -152,7 +152,8 @@ Les scopes sont des patterns additifs (allowlist). Deux formats :
 
 **Scopes string** (v2+) :
 ```
-GET:/v1/apps/*            -> lecture sur /v1/apps/ et sous-chemins
+GET:/v1/apps              -> lecture du listing /v1/apps (path exact)
+GET:/v1/apps/*            -> lecture des sous-chemins de /v1/apps/ (ex: /v1/apps/my-app), pas /v1/apps nu
 POST:/v1/apps/my-app/*    -> ecriture sur une app specifique
 GET|POST:/v1/apps/*       -> lecture + ecriture
 *:*                       -> acces total
