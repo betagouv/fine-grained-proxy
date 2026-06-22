@@ -4,23 +4,7 @@ Guide de deploiement de Fine-Grained Proxy sur [Scalingo](https://scalingo.com/)
 
 ## TL;DR
 
-Scalingo ne supporte pas Deno nativement. Pas de buildpack officiel, **pas de Dockerfile natif au build**. La seule option viable est le **buildpack Heroku pour Deno** (`chibat/heroku-buildpack-deno`), compatible avec Scalingo via la variable `BUILDPACK_URL`.
-
-## Recherche : est-ce que Scalingo supporte Deno ?
-
-### Runtimes natifs Scalingo
-
-Scalingo supporte nativement : Node.js, Ruby, Python, PHP, Java, Go, Scala, Elixir, Clojure. **Deno n'est pas dans la liste.**
-
-### Dockerfile natif ?
-
-**Non.** Scalingo n'execute pas de Dockerfile au build. Le systeme de build est 100% base sur des buildpacks. Le "Docker Image Addon" permet d'**exporter** l'image buildee par Scalingo, pas de builder depuis un Dockerfile custom.
-
-Un `Dockerfile` a la racine du repo sera simplement ignore par Scalingo.
-
-### Buildpack custom : la seule option
-
-Scalingo supporte les buildpacks Heroku via la variable d'environnement `BUILDPACK_URL`. Le buildpack [`chibat/heroku-buildpack-deno`](https://github.com/chibat/heroku-buildpack-deno) est le seul buildpack Deno maintenu.
+Scalingo ne supporte pas Deno nativement. La solution retenue est le buildpack [`betagouv/deno-buildpack`](https://github.com/betagouv/deno-buildpack), compatible Scalingo. Il installe Deno, cache les deps, et **execute automatiquement `deno task build`** si une task `build` existe dans `deno.json` — ce qui compile les assets CSS + client JS pendant la phase de build du slug, avant le demarrage du dyno.
 
 ## Etape par etape
 
@@ -30,33 +14,27 @@ Scalingo supporte les buildpacks Heroku via la variable d'environnement `BUILDPA
 scalingo create fgp-proxy
 ```
 
-### 2. Configurer le buildpack Deno
+### 2. Configurer le buildpack
 
 ```bash
-scalingo --app fgp-proxy env-set BUILDPACK_URL=https://github.com/chibat/heroku-buildpack-deno.git
+scalingo --app fgp-proxy env-set BUILDPACK_URL=https://github.com/betagouv/deno-buildpack.git
 ```
 
-### 3. Ajouter un Procfile
+Le buildpack detecte automatiquement le projet via `deno.json` (affiche "Deno" + exit 0, compatible Scalingo). Pendant le build, il detecte la task `build` dans `deno.json` et execute `deno task build` — CSS, client JS, version et changelog sont compiles dans `static/` avant le demarrage du dyno. `static/` et `src/ui/changelog-data.ts` etant gitignores, ce build au deploy est indispensable.
 
-Creer un fichier `Procfile` a la racine du repo :
+Si besoin, la commande de build peut etre surchargee via la variable d'environnement `DENO_BUILD_CMD`.
 
-```
-web: deno run --allow-net --allow-env --allow-read src/main.ts
-```
+### 3. Verifier le Procfile
 
-Le process `web` est obligatoire sur Scalingo. Il doit ecouter sur `$PORT` (FGP le fait deja via `Deno.env.get("PORT")`).
-
-### 4. Optionnel : fixer la version Deno
-
-Creer un fichier `runtime.txt` a la racine :
+Le `Procfile` a la racine du repo :
 
 ```
-2.1.4
+web: deno serve --allow-net --allow-env --allow-read --port $PORT src/main.ts
 ```
 
-Sans ce fichier, le buildpack utilise la derniere version de Deno.
+`--port $PORT` est obligatoire. `deno serve` ne lit pas la variable d'environnement `PORT` automatiquement — sans ce flag, le serveur binde sur 8000 et Scalingo echoue le health check TCP.
 
-### 5. Configurer les variables d'environnement
+### 4. Configurer les variables d'environnement
 
 ```bash
 scalingo --app fgp-proxy env-set FGP_SALT="votre-salt-secret"
@@ -66,11 +44,32 @@ scalingo --app fgp-proxy env-set SCALINGO_AUTH_URL="https://auth.scalingo.com"
 
 `PORT` est automatiquement fourni par Scalingo.
 
+### 5. Optionnel : fixer la version Deno
+
+Creer un fichier `.deno-version` a la racine :
+
+```
+2.1.4
+```
+
+Sans ce fichier, le buildpack utilise sa version par defaut (2.1.4 au moment de l'ecriture).
+
 ### 6. Deployer
 
 ```bash
 git remote add scalingo git@ssh.osc-fr1.scalingo.com:fgp-proxy.git
 git push scalingo main
+```
+
+Le log de build doit montrer le build des assets avant le demarrage du dyno :
+
+```
+-----> Deno app detected
+-----> Installing Deno ...
+-----> Caching Deno dependencies
+-----> Running build: deno task build
+       ...
+-----> Deno installation complete
 ```
 
 ### 7. Verifier
@@ -84,48 +83,35 @@ curl https://fgp-proxy.osc-fr1.scalingo.io/healthz
 
 ### Buildpack community, pas officiel
 
-Le buildpack `chibat/heroku-buildpack-deno` est maintenu par un contributeur individuel. Il n'est ni officiel Heroku, ni officiel Scalingo. Risques :
+`betagouv/deno-buildpack` est maintenu par l'equipe beta.gouv.fr. Il n'est pas officiel Scalingo. Risques :
 
-- **Abandon** : si le mainteneur arrete, pas de mise a jour Deno
-- **Compatibilite** : le buildpack est fait pour Heroku, pas Scalingo. Il fonctionne grace a la compatibilite buildpack entre les deux plateformes, mais rien ne le garantit a long terme
-- **Cache deps** : le buildpack cache les deps Deno. Si ca casse, il faut purger le cache (`scalingo --app fgp-proxy deployment-delete-cache`)
-
-### Pas de JSR natif dans le buildpack
-
-Le buildpack telecharge Deno et execute la commande du Procfile. Les imports JSR (`jsr:@hono/hono`, etc.) sont resolus au runtime via le `deno.json`. Ca devrait fonctionner, mais ce n'est pas un chemin teste par le mainteneur du buildpack.
-
-### CompressionStream / Web Crypto
-
-Ces APIs sont fournies par le runtime Deno, pas par Scalingo. Tant que le buildpack installe une version recente de Deno (>= 1.38), tout fonctionne.
+- **Abandon** : si la maintenance s'arrete, pas de mise a jour Deno. Solution : forker.
+- **Cache corrompu** : en cas de probleme entre deux builds, purger avec `scalingo --app fgp-proxy deployment-delete-cache`
 
 ### PORT
 
-Scalingo injecte la variable `PORT`. FGP la lit via `Deno.env.get("PORT")` avec un defaut a 8000. Compatible out of the box. Scalingo verifie que le process ecoute sur `$PORT` via un TCP SYN check au deploiement.
+Scalingo injecte `PORT` comme variable d'environnement. `deno serve` ne la lit pas automatiquement — le flag `--port $PORT` dans le Procfile est obligatoire. Scalingo verifie que le process ecoute sur `$PORT` via un TCP SYN check au deploiement.
+
+### CompressionStream / Web Crypto
+
+Ces APIs sont fournies par le runtime Deno. Tant que le buildpack installe une version recente de Deno (>= 1.38), tout fonctionne.
 
 ## Alternatives si le buildpack pose probleme
 
 ### Option A : Deployer sur Deno Deploy
 
-C'est la cible naturelle pour FGP (voir [deno-deploy.md](./deno-deploy.md)). Zero config, support natif de tout ce qu'utilise le projet (JSR, Web Crypto, CompressionStream, `Deno.serve()`).
+C'est la cible naturelle pour FGP (voir [deno-deploy.md](./deno-deploy.md)). Zero config, support natif complet (JSR, Web Crypto, CompressionStream, `deno serve`).
 
 ### Option B : Fly.io ou Railway avec Dockerfile
 
-Ces plateformes supportent les Dockerfile natifs. Creer un Dockerfile basique avec `denoland/deno` comme base image.
+Ces plateformes supportent les Dockerfiles natifs. Le `Dockerfile` existant a la racine du repo est utilisable directement.
 
-### Option C : Multi-buildpack avec apt-buildpack
+### Option C : Committer les assets buildes
 
-Utiliser le multi-buildpack Scalingo pour installer Deno via le apt-buildpack :
-
-```
-# .buildpacks
-https://github.com/Scalingo/apt-buildpack.git
-https://github.com/Scalingo/nodejs-buildpack.git
-```
-
-Plus fragile que l'option buildpack Deno, pas recommande en production.
+Retirer `static/` et `src/ui/changelog-data.ts` du `.gitignore`, builder localement avant chaque push, committer les artifacts. Le Procfile reste `deno serve --port $PORT ...` sans build.
 
 ## Recommandation
 
-Pour FGP, **Deno Deploy est le choix naturel** : zero config, support natif complet. Scalingo reste viable via le buildpack community, mais avec plus de friction et de risque de casse sur le long terme.
+Pour FGP, **Deno Deploy est le choix naturel** : zero config, support natif complet. Scalingo reste viable via `betagouv/deno-buildpack`, avec une configuration minimale.
 
-Si Scalingo est un hard requirement (contrainte infra, souverainete donnees FR, etc.), le buildpack `chibat/heroku-buildpack-deno` est la voie a suivre. Tester le deploiement en staging avant de se committer.
+Si Scalingo est un hard requirement (contrainte infra, souverainete donnees FR, etc.), `betagouv/deno-buildpack` est la voie a suivre.
